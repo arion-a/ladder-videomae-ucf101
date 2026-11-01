@@ -545,7 +545,7 @@ def run_recommended(Xs, taus, theta=0.5, **kw):
 
 
 # ===================================================================== PART 3: decomposition read-out (shares and rebuild)
-def decompose(Xs, M, mu, tau):
+def decompose(Xs, M, mu, tau, fit=None):
     """Spectral decomposition of one ladder level: x - mu ~ sum_i c_i u_i, plus a remainder.
     M (m x d) = a level map from run_ladder (acts on x - mu), mu its centring vector, tau = the lag that level was cut at.
     s = M (x - mu) is the level's state (m-dim, unit covariance over the pooled frames). F = E[s_{t+tau} s_t^T] is the
@@ -562,7 +562,7 @@ def decompose(Xs, M, mu, tau):
     a missing eigenvector) V is ill-conditioned and `cond` is large - do not read c_i then. Since s is whitened, the
     average share of ANY m-dim block is m/d: read the per-frame and per-video shares, not the average."""
     s_list = [(X - mu) @ M.T for X in Xs]
-    F = lag_moment(s_list, tau)
+    F = lag_moment(s_list if fit is None else [(X - mu) @ M.T for X in fit], tau)   # fit: data the dynamics are estimated on (default Xs itself)
     lam, V = np.linalg.eig(F)
     Winv = np.linalg.inv(V)
     Mp = np.linalg.pinv(M)
