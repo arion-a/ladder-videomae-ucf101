@@ -10,4 +10,4 @@ Question: does the ladder's representation beat VideoMAE V2's own frozen feature
 - Arms: native vector; mean; mean+std; PCA to the ladder's dimension then mean+std; ladder level (chosen on validation). Control: ladder fitted on time-shuffled sequences.
 - Decision: paired bootstrap over test videos, 95% interval of the accuracy difference.
 Run: open `run_colab.ipynb` in Colab (T4 GPU) and Run all. `extract.py` makes the features, `fit_probe.py` does everything else.
-Tested locally only on synthetic features (the code path runs end to end); extraction has not yet been run on real videos.
+Pilot (7 real UCF101 videos, CPU): extraction runs, shapes (8,768), no NaN, native-vector check passes. CPU speed was about 30 s per clip, so the full run needs a GPU. Probe/ladder code tested end to end on synthetic features only. Needs transformers==4.47.1 (the model's bundled code breaks on transformers 5.x) and easydict.
