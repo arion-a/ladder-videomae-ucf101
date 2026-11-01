@@ -542,3 +542,56 @@ def run_recommended(Xs, taus, theta=0.5, **kw):
     """run_ladder with RECOMMENDED switches; any keyword overrides."""
     cfg = dict(RECOMMENDED); cfg.update(kw)
     return run_ladder(Xs, taus, theta, **cfg)
+
+
+# ===================================================================== PART 3: decomposition read-out (shares and rebuild)
+def decompose(Xs, M, mu, tau):
+    """Spectral decomposition of one ladder level: x - mu ~ sum_i c_i u_i, plus a remainder.
+    M (m x d) = a level map from run_ladder (acts on x - mu), mu its centring vector, tau = the lag that level was cut at.
+    s = M (x - mu) is the level's state (m-dim, unit covariance over the pooled frames). F = E[s_{t+tau} s_t^T] is the
+    block's own dynamics. F = V diag(lam) V^{-1}: columns v_i = patterns (F v_i = lam_i v_i), rows w_i of V^{-1} =
+    measurements (w_i^T F = lam_i w_i^T, w_i^T v_j = delta_ij). Per frame c_i = w_i^T s, so s = sum c_i v_i exactly and
+    the predicted next amount is lam_i c_i. In frame space u_i = pinv(M) v_i, and
+        x - mu = sum_i c_i u_i + (x - mu - P(x - mu)),   P = pinv(M) M the orthogonal projector on the rows of M,
+    so the rebuilt part and the remainder are orthogonal and their squared norms add (Pythagoras).
+    A complex pair (lam, conj lam) is one rotating plane: its contribution is 2 Re(c u), amplitude |c|, phase angle(c);
+    the phase advances by angle(lam) per lag. Returns (list of dicts, one per video: C (T x m, complex), amp, phase,
+    rebuilt (T x d), remainder (T x d), share (T,)), and a dict with lam, V, Winv (the left measurements), U (d x m).
+    Limits: the individual amounts c_i are on the oblique basis, so per-mode energies do not add to the total share
+    unless F is symmetric (compare `mode_share`, which is each mode alone); if F is defective (repeated eigenvalue with
+    a missing eigenvector) V is ill-conditioned and `cond` is large - do not read c_i then. Since s is whitened, the
+    average share of ANY m-dim block is m/d: read the per-frame and per-video shares, not the average."""
+    s_list = [(X - mu) @ M.T for X in Xs]
+    F = lag_moment(s_list, tau)
+    lam, V = np.linalg.eig(F)
+    Winv = np.linalg.inv(V)
+    Mp = np.linalg.pinv(M)
+    U = Mp @ V
+    out = []
+    for X, S in zip(Xs, s_list):
+        C = S @ Winv.T                                    # C[t,i] = w_i^T s_t  (complex for rotating modes)
+        Xc = X - mu
+        rebuilt = (C @ U.T).real                          # sum_i c_i u_i, conjugate partners add to 2 Re
+        rem = Xc - rebuilt
+        share = (rebuilt ** 2).sum(1) / np.maximum((Xc ** 2).sum(1), 1e-300)
+        out.append(dict(C=C, amp=np.abs(C), phase=np.angle(C), rebuilt=rebuilt, remainder=rem, share=share))
+    return out, dict(lam=lam, V=V, Winv=Winv, U=U, F=F, cond=float(np.linalg.cond(V)))
+
+
+def mode_share(U, C, Xc):
+    """each mode alone: |contribution of mode i|^2 / |x - mu|^2 per frame (T x m). Conjugate partners are counted
+    together in the first of the pair and set to 0 in the second, so the columns are one per plane or real mode."""
+    T, m = C.shape
+    sh = np.zeros((T, m)); done = set()
+    tot = np.maximum((Xc ** 2).sum(1), 1e-300)
+    lam_idx = range(m)
+    for i in lam_idx:
+        if i in done: continue
+        j = None
+        if np.abs(U[:, i].imag).max() > 1e-12:           # complex: find conjugate partner
+            d = np.abs(U - U[:, [i]].conj()).sum(0); d[i] = np.inf; j = int(np.argmin(d)); done.add(j)
+            z = 2 * (C[:, [i]] * U[:, i][None, :]).real
+        else:
+            z = (C[:, [i]] * U[:, i][None, :]).real
+        sh[:, i] = (z ** 2).sum(1) / tot
+    return sh
